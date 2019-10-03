@@ -11,8 +11,6 @@ using namespace std;
 using namespace cv;
 
 // Global variables
-static int vx[5] = {0,  1,  0, -1,  0};     // Possible displacement vectors
-static int vy[5] = {0,  0,  1,  0, -1};     // in a logarithmic search
 
 void ReadVideo( string &fn, Mat &img1, Mat &img2 )
 {
@@ -45,37 +43,28 @@ void ReadVideo( string &fn, Mat &img1, Mat &img2 )
     }   
 }
 
-void LogMSE( const Size MN, int dx, int dy, int vS, Mat *mse, Mat img1, Mat img2 )
+void LogMSE( const Size MN, vector< Point2i > V, Point2i bp, Point2i delta, int vS, Mat img1, Mat img2, Mat &mse )
 {
     float square = MN.width * MN.height;            // square block
-    *mse = Mat::ones( mse->size(), CV_32FC1 );
-    *mse *= 65025;
-    float mse0=0, mse1=0, mse2=0, mse3=0, mse4=0;
-    for ( int i = 0; i < MN.width; i++ )        // cols
+    mse = Mat::ones( mse.size(), CV_32FC1 );
+    mse *= 65025;
+    vector< float > mse_i(V.size(), 0.0);
+    for ( size_t k = 0; k < V.size(); k++ )         // num block
     {
-        for ( int j = 0; j < MN.height; j++ )   // rows
+        if ( ( delta.x + vS*V[k].x <= mse.cols ) && ( delta.y + vS*V[k].y <= mse.rows ) && 
+             ( delta.x + vS*V[k].x >= 0 ) && ( delta.y + vS*V[k].y >= 0 ) )     // border check
         {
-            mse0 += (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[0] + j, dx + vS*vx[0] + i)) * 
-                    (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[0] + j, dx + vS*vx[0] + i));
-            if ( dx + vS*vx[1] <= mse->cols )
-                mse1 += (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[1] + j, dx + vS*vx[1] + i)) * 
-                        (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[1] + j, dx + vS*vx[1] + i));
-            if ( dy + vS*vy[2] <= mse->rows )
-                mse2 += (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[2] + j, dx + vS*vx[2] + i)) * 
-                        (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[2] + j, dx + vS*vx[2] + i));
-            if ( dx + vS*vx[3] >= 0 )
-                mse3 += (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[3] + j, dx + vS*vx[3] + i)) * 
-                        (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[3] + j, dx + vS*vx[3] + i));
-            if ( dy + vS*vy[4] >= 0 )
-                mse4 += (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[4] + j, dx + vS*vx[4] + i)) * 
-                        (img1.at< uchar >(dy + j, dx + i) - img2.at< uchar >(dy + vS*vy[4] + j, dx + vS*vx[4] + i));
+            for ( int i = 0; i < MN.width; i++ )        // cols
+            {
+                for ( int j = 0; j < MN.height; j++ )   // rows
+                {
+                        mse_i[k] += (img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i)) * 
+                                    (img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i));
+                }
+            }
+            mse.at< float >(delta.y+vS*V[k].y, delta.x+vS*V[k].x) = mse_i[k] / square;
         }
     }
-    mse->at< float >(dy+vS*vy[0], dy+vS*vx[0]) = mse0 / square;
-    mse->at< float >(dy+vS*vy[1], dy+vS*vx[1]) = mse1 / square;
-    mse->at< float >(dy+vS*vy[2], dy+vS*vx[2]) = mse2 / square;
-    mse->at< float >(dy+vS*vy[3], dy+vS*vx[3]) = mse3 / square;
-    mse->at< float >(dy+vS*vy[4], dy+vS*vx[4]) = mse4 / square;
 }
 
 int main(int argc, char *argv[])
@@ -111,35 +100,67 @@ int main(int argc, char *argv[])
     Mat flow = Mat::zeros( img_in1.rows / S_block.height, img_in1.cols / S_block.width, CV_32FC2 );
     Mat MSE = Mat::zeros( flow.size(), CV_32FC1 );
     
-    int Dx = 0;             // Crosshair center offset
-    int Dy = 0;
-    int Size_vector = 5;    // Initial displacement vector
-    float min_MSE = 0;
-    int k = 0;              // Search hierarchy
+    int start_num = 4;
+    int Size_vector = start_num;    // Initial displacement vector
+    double min_MSE = 0, max_MSE = 65025;
+    Point2i min_MSE_point, max_MSE_point;
+    Point2i offset_point, block_point;
+    
+        // Possible displacement vectors in a logarithmic search
+    const vector< Point2i > Vcross = { Point(0,0), Point(1,0), Point(0,1), Point(-1,0), Point(0,-1) };
+    const vector< Point2i > Vsquare = { Point(0,0), Point(1,0), Point(1,1), Point(0,1), Point(-1,1), 
+                                        Point(-1,0), Point(-1,-1), Point(0,-1), Point(1,-1) };
+    
+    waitKey(100);
+    for ( int i = 0; i < flow.cols; i++ )
+    {
+        for ( int j = 0; j < flow.rows; j++ )
+        {
+            block_point.x = i;
+            block_point.y = j;
+            offset_point.x = i;
+            offset_point.y = j;
+            while ( Size_vector > 1 )
+            {
+                LogMSE( S_block, Vcross, block_point, offset_point, Size_vector, img_grey1, img_grey2, MSE );
+//                cout << "MSE( " << offset_point.x << ", " << offset_point.y << " ): \n" << MSE << endl;
+                minMaxLoc( MSE, &min_MSE, &max_MSE, &min_MSE_point, &max_MSE_point );
+//                cout << "min: " << min_MSE << endl;
+//                cout << "min P: " << min_MSE_point << endl;
+                
+                if ( offset_point == min_MSE_point ) 
+                {
+                    Size_vector /= 2;
+                }
+                else
+                {
+                    offset_point = min_MSE_point;
+                    Size_vector = start_num;
+                }
+            }
+            LogMSE( S_block, Vsquare, block_point, offset_point, Size_vector, img_grey1, img_grey2, MSE );
+//            cout << "MSE( " << offset_point.x << ", " << offset_point.y << " ): \n" << MSE << endl;
+            minMaxLoc( MSE, &min_MSE, &max_MSE, &min_MSE_point, &max_MSE_point );
+//            cout << "min: " << min_MSE << endl;
+//            cout << "min P: " << min_MSE_point << endl;
+            
+            flow.at< Point2f >(j, i) = min_MSE_point;
+            
+            Size_vector = start_num;
+        }
+    }
     
     for ( int i = 0; i < flow.cols; i++ )
     {
         for ( int j = 0; j < flow.rows; j++ )
         {
-            while ( Size_vector > 1 )
-            {
-                switch (k) 
-                {
-                    case 0:
-                        break;
-                    case 1:
-                        break;
-                    case 2:
-                        break;
-                    case 3:
-                        break;
-                    case 4:
-                        break;
-                }
-            }
+            line( img_in2, 
+                  Point( cvRound( S_block.width*(i+0.5f) ), cvRound( S_block.height*(j+0.5f) ) ),     // cvRound()
+                  Point( cvRound( S_block.width*(flow.at<Point2f>(j,i).x+0.5f) ), cvRound( S_block.height*(flow.at<Point2f>(j,i).y+0.5f) ) ), 
+                  Scalar(255, 100, 0) );        // H: 0-179, S: 0-255, V: 0-255
         }
     }
-    
+    imwrite( "Flow.png", img_in2 );
     
     waitKey();
     return 0; // a.exec();
