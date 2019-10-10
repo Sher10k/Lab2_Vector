@@ -69,6 +69,7 @@ void LogMSE( const Size MN, vector< Point2i > V, Point2i bp, Point2i delta, int 
                 {
                         mse_i[k] += (img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i)) * 
                                     (img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i));
+//                        mse_i[k] += abs(img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i));
                 }
             }
             mse.at< float >(delta.y+vS*V[k].y, delta.x+vS*V[k].x) = mse_i[k] / square;
@@ -89,7 +90,7 @@ int main(int argc, char *argv[])
     imwrite( "img_in2.png", img_in2 );
 //    imshow( "img1", img_in1 );
 //    imshow( "img2", img_in2 );
-        // Convert to gray
+        // Convert to gray and blur
     Mat img_grey1, img_grey2;
     cvtColor( img_in1, img_grey1, COLOR_BGR2GRAY );
     cvtColor( img_in2, img_grey2, COLOR_BGR2GRAY );
@@ -128,6 +129,7 @@ int main(int argc, char *argv[])
     const vector< Point2i > Vsquare = { Point(0,0), Point(1,0), Point(1,1), Point(0,1), Point(-1,1), 
                                         Point(-1,0), Point(-1,-1), Point(0,-1), Point(1,-1) };
 
+        // Calculate vectors
     imshow( "vec_flow", img_in2 );
     waitKey(50);
     //int but = waitKey(0);
@@ -163,23 +165,24 @@ int main(int argc, char *argv[])
 //            cout << "min: " << min_MSE << endl;
 //            cout << "min P: " << min_MSE_point << endl;
 
-            flow.at< Point2f >(j, i) = Point(min_MSE_point.x / S_block.width, min_MSE_point.y / S_block.height);
+            flow.at< Point2f >(j, i) = Point(min_MSE_point.x / S_block.width, min_MSE_point.y / S_block.height);    // Point2f-----!!!!!!!!!!!!!
             
             Size_vector = start_num;
         }
     }
     //cout << "Flow: " << endl << flow << endl;
     
-    //int click = waitKey(15);
+        // Draw vectors
+    Mat vectors = Mat::zeros(img_in1.size(), img_in1.type());
     for ( int i = 0; i < flow.cols; i++ )
     {
         for ( int j = 0; j < flow.rows; j++ )
         {
-//            line( img_in2,
+//            line( vectors,
 //                  Point( cvRound( S_block.width*(i+0.5f) ), cvRound( S_block.height*(j+0.5f) ) ),     // cvRound()
 //                  Point( cvRound( S_block.width*(flow.at<Point2f>(j,i).x+0.5f) ), cvRound( S_block.height*(flow.at<Point2f>(j,i).y+0.5f) ) ),
 //                  Scalar(255, 100, 0) );        // H: 0-179, S: 0-255, V: 0-255
-            line( img_in2,
+            line( vectors,
                   Point( int( S_block.width*(i+0.5f) ), int( S_block.height*(j+0.5f) ) ),     // cvRound()
                   Point( int( S_block.width*(flow.at<Point2f>(j,i).x+0.5f) ), int( S_block.height*(flow.at<Point2f>(j,i).y+0.5f) ) ),
                   Scalar(255, 100, 0) );        // H: 0-179, S: 0-255, V: 0-255
@@ -187,10 +190,44 @@ int main(int argc, char *argv[])
         }
     }
     //click = waitKey(15);
-    imwrite( "Flow.png", img_in2 );
-    imshow( "vec_flow", img_in2 );
+    imwrite( "Flow.png", vectors );
+    imshow( "vec_flow", vectors );
     cout << " --- vec_dif cmplited" << endl;
 
+    
+    
+    
+        // Recursive vector median filtering
+    for ( int x = 0; x < flow.cols; x++ )
+    {
+        for ( int y = 0; y < flow.rows; y++ )
+        {
+            int num_block = 0;
+            for ( size_t k = 1; k < 9; k++ )         // num block
+            {
+                if ( ( x + Vsquare[k].x <= flow.cols ) && ( y + Vsquare[k].y <= flow.rows ) && 
+                     ( x + Vsquare[k].x >= 0 ) && ( y + Vsquare[k].y >= 0 ) )     // border check
+                {
+                    if ( !(flow.at< Point2f >(y, x) == Point2f(x, y)) )
+                    {
+                        
+                        num_block ++;
+                    }
+                    
+                    for ( int i = 0; i < 3; i++ )        // cols
+                    {
+                        for ( int j = 0; j < 3; j++ )   // rows
+                        {
+                            
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    
+    
     waitKey(0);
     MSE.release();
     flow.release();
