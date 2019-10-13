@@ -1,6 +1,8 @@
 #include <QCoreApplication>
 
 #include <vector>
+#include <queue>
+#include <math.h>
 #include <iostream>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -13,6 +15,23 @@ using namespace cv;
 #define RESIZE 1
 #define W_img 640   // 640 320
 #define H_img 480   // 480 240
+
+    // Структура для фильтрации векторов
+struct L2_norm
+{
+    float L2;
+    Point dxy;
+    Point xy;
+};
+    // Перегруженный оператор для сортировки
+struct less_then_L2
+{
+    inline bool operator() (const L2_norm& str1, const L2_norm& str2)
+    {
+        return (str1.L2 < str2.L2);
+    }
+};
+
 
 void ReadVideo( string fn, Mat *img1, Mat *img2 )
 {
@@ -33,7 +52,7 @@ void ReadVideo( string fn, Mat *img1, Mat *img2 )
 #endif
         imshow( "Real time", frameRAW );
         int button = waitKey();
-        if ( button == 13 )                  // Take picture, press "Enter"
+        if ( (button == 13) || (button == 141) )                  // Take picture, press "Enter"
         {
             frameRAW.copyTo( *img1 );
             //for (int i=0; i<5; i++)
@@ -77,6 +96,63 @@ void LogMSE( const Size MN, vector< Point2i > V, Point2i bp, Point2i delta, int 
     }
 }
 
+void filter_vectors( Mat &src, Mat &dst, vector< Point2i > V)
+{
+        // Recursive vector median filtering
+    //dst = src.clone();
+    for ( int x = 0; x < src.cols; x++ )
+    {
+        for ( int y = 0; y < src.rows; y++ )
+        {
+                // проверка нулевости вектора
+            if ( !(src.at< Point2f >(y, x) == Point2f(x, y)) )
+            {
+                    // Колличество найденых ненулевых смещенных векторов в блоке
+                int num_noZero = 0;
+                vector< L2_norm > L2_block;
+                for ( size_t k = 1; k < 9; k++ )         // num block, блоки смещения
+                {
+                    L2_norm Li;
+                    if ( ( x + V[k].x <= src.cols ) && ( y + V[k].y <= src.rows ) && 
+                         ( x + V[k].x >= 0 ) && ( y + V[k].y >= 0 ) )     // border check
+                    {
+                            // Проверка нулевости смещенного вектора
+                        if ( !(src.at< Point2f >(y + V[k].y, x + V[k].x) == Point2f(x + V[k].x, y + V[k].y)) )    
+                        {
+                                // норма L2 между вектором и смещенным вектором 
+                            Li.L2 = sqrt( (((x - src.at< Point2f >(y, x).x) - (V[k].x - src.at< Point2f >(y + V[k].y, x + V[k].x).x)) *
+                                           ((x - src.at< Point2f >(y, x).x) - (V[k].x - src.at< Point2f >(y + V[k].y, x + V[k].x).x))) + 
+                                          (((y - src.at< Point2f >(y, x).y) - (V[k].y - src.at< Point2f >(y + V[k].y, x + V[k].x).y)) *
+                                           ((y - src.at< Point2f >(y, x).y) - (V[k].y - src.at< Point2f >(y + V[k].y, x + V[k].x).y))) );
+                                // дельта координат меджу вектором и смещенным вектором
+                            Li.dxy = V[k];
+                                // значение смещенного вектора дижения 
+                            Li.xy = src.at< Point2f >(y + V[k].y, x + V[k].x);
+                            L2_block.push_back(Li);
+                            num_noZero++ ;
+                        }
+                    }
+                }
+                if (num_noZero > 0)
+                {
+                        // Сортировка по норме L2
+                    sort( L2_block.begin(), L2_block.end(), less_then_L2() );
+                        // Расчет среднего элемента (вектора) и присвоение его вектору 
+                    unsigned mid = unsigned( L2_block.size() / 2 );
+                    float xdx = L2_block.at( mid ).xy.x - L2_block.at( mid ).dxy.x;
+                    float ydy = L2_block.at( mid ).xy.y - L2_block.at( mid ).dxy.y;
+                    if ( (xdx >= 0) && (xdx <= dst.cols) && (ydy >= 0) && (ydy <= dst.rows) )
+                        dst.at< Point2f >(y, x) = Point2f( xdx, ydy );
+                }
+    //                else 
+    //                {
+    //                    dst.at< Point2f >(y, x) = Point2f(y, x);
+    //                }
+            }
+        }
+    }
+}
+
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
@@ -113,7 +189,6 @@ int main(int argc, char *argv[])
     Mat flow = Mat::zeros( img_in1.rows / S_block.height, img_in1.cols / S_block.width, CV_32FC2 );
     cout << "Flow.cols (width) = " << flow.cols << endl;
     cout << "Flow.rows (height) = " << flow.rows << endl;
-    //Mat MSE = Mat::zeros( flow.size(), CV_32FC1 );
     Mat MSE = Mat::zeros( img_grey1.size(), CV_32FC1 );
     cout << "MSE.cols (width) = " << MSE.cols << endl;
     cout << "MSE.rows (height) = " << MSE.rows << endl;
@@ -132,7 +207,11 @@ int main(int argc, char *argv[])
         // Calculate vectors
     imshow( "vec_flow", img_in2 );
     waitKey(50);
-    //int but = waitKey(0);
+    float progress = 0.0;
+    int barWidth = 70;
+    float step = 1.0f / flow.total();
+    progress += step;
+    cout << " --- Start vector calculation" << endl;
     for ( int i = 0; i < flow.cols; i++ )
     {
         for ( int j = 0; j < flow.rows; j++ )
@@ -168,9 +247,21 @@ int main(int argc, char *argv[])
             flow.at< Point2f >(j, i) = Point(min_MSE_point.x / S_block.width, min_MSE_point.y / S_block.height);    // Point2f-----!!!!!!!!!!!!!
             
             Size_vector = start_num;
+            
+                // progress
+            progress += step;
+            std::cout << "[";
+            int pos = int( float(barWidth) * progress );
+            for (int i = 0; i < barWidth; ++i) {
+                if (i < pos) std::cout << "=";
+                else if (i == pos) std::cout << ">";
+                else std::cout << " ";
+            }
+            std::cout << "] " << int(progress * 100.0f) << " %\r";
+            std::cout.flush();
         }
     }
-    //cout << "Flow: " << endl << flow << endl;
+    cout << endl;
     
         // Draw vectors
     Mat vectors = Mat::zeros(img_in1.size(), img_in1.type());
@@ -178,53 +269,35 @@ int main(int argc, char *argv[])
     {
         for ( int j = 0; j < flow.rows; j++ )
         {
-//            line( vectors,
-//                  Point( cvRound( S_block.width*(i+0.5f) ), cvRound( S_block.height*(j+0.5f) ) ),     // cvRound()
-//                  Point( cvRound( S_block.width*(flow.at<Point2f>(j,i).x+0.5f) ), cvRound( S_block.height*(flow.at<Point2f>(j,i).y+0.5f) ) ),
-//                  Scalar(255, 100, 0) );        // H: 0-179, S: 0-255, V: 0-255
             line( vectors,
                   Point( int( S_block.width*(i+0.5f) ), int( S_block.height*(j+0.5f) ) ),     // cvRound()
                   Point( int( S_block.width*(flow.at<Point2f>(j,i).x+0.5f) ), int( S_block.height*(flow.at<Point2f>(j,i).y+0.5f) ) ),
-                  Scalar(255, 100, 0) );        // H: 0-179, S: 0-255, V: 0-255
-//            imwrite( "Flow.png", img_in2 );
+                  Scalar(255, 100, 0) );
         }
     }
-    //click = waitKey(15);
     imwrite( "Flow.png", vectors );
     imshow( "vec_flow", vectors );
     cout << " --- vec_dif cmplited" << endl;
-
-    
-    
     
         // Recursive vector median filtering
-    for ( int x = 0; x < flow.cols; x++ )
+    Mat flow_new = flow.clone();
+    filter_vectors( flow, flow_new, Vsquare);
+    
+        // Draw new vectors
+    vectors = Mat::zeros(img_in1.size(), img_in1.type());
+    for ( int i = 0; i < flow_new.cols; i++ )
     {
-        for ( int y = 0; y < flow.rows; y++ )
+        for ( int j = 0; j < flow_new.rows; j++ )
         {
-            int num_block = 0;
-            for ( size_t k = 1; k < 9; k++ )         // num block
-            {
-                if ( ( x + Vsquare[k].x <= flow.cols ) && ( y + Vsquare[k].y <= flow.rows ) && 
-                     ( x + Vsquare[k].x >= 0 ) && ( y + Vsquare[k].y >= 0 ) )     // border check
-                {
-                    if ( !(flow.at< Point2f >(y, x) == Point2f(x, y)) )
-                    {
-                        
-                        num_block ++;
-                    }
-                    
-                    for ( int i = 0; i < 3; i++ )        // cols
-                    {
-                        for ( int j = 0; j < 3; j++ )   // rows
-                        {
-                            
-                        }
-                    }
-                }
-            }
+            line( vectors,
+                  Point( int( S_block.width*(i+0.5f) ), int( S_block.height*(j+0.5f) ) ),     // cvRound()
+                  Point( int( S_block.width*(flow_new.at<Point2f>(j,i).x+0.5f) ), int( S_block.height*(flow_new.at<Point2f>(j,i).y+0.5f) ) ),
+                  Scalar(255, 100, 0) );
         }
     }
+    imwrite( "Flow_new.png", vectors );
+    imshow( "vec_flow", vectors );
+    cout << " --- New_vec_dif cmplited" << endl;
     
     
     
