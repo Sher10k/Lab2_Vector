@@ -96,58 +96,86 @@ void LogMSE( const Size MN, vector< Point2i > V, Point2i bp, Point2i delta, int 
     }
 }
 
-void filter_vectors( Mat &src, Mat &dst, vector< Point2i > V)
+void filter_vectors( Mat &src, Mat &dst )
 {
+    const vector< Point2i > V = { Point(-1,-1), Point(0,-1), Point(1,-1), Point(-1,0), Point(0,0), 
+                                        Point(1,0), Point(-1,1), Point(0,1), Point(1,1) };
         // Recursive vector median filtering
     //dst = src.clone();
-    for ( int x = 0; x < src.cols; x++ )
+    for ( int x = 0; x < src.cols; x +=3 )
     {
-        for ( int y = 0; y < src.rows; y++ )
+        for ( int y = 0; y < src.rows; y +=3 )
         {
                 // проверка нулевости вектора
             if ( !(src.at< Point2f >(y, x) == Point2f(x, y)) )
             {
-                    // Колличество найденых ненулевых смещенных векторов в блоке
-                int num_noZero = 0;
-                vector< L2_norm > L2_block;
-                for ( size_t k = 1; k < 9; k++ )         // num block, блоки смещения
+                    // блок из суммы вычесленных растояний ежду векторами
+                vector< L2_norm > d_block;
+                for ( size_t k = 0; k < 9; k++ )         // num block, блоки смещения
                 {
-                    L2_norm Li;
+                    L2_norm di;
+                    di.L2 = 0;
+                    di.xy = Point(0,0);
+                    di.dxy = Point(0,0);
                     if ( ( x + V[k].x <= src.cols ) && ( y + V[k].y <= src.rows ) && 
                          ( x + V[k].x >= 0 ) && ( y + V[k].y >= 0 ) )     // border check
                     {
-                            // Проверка нулевости смещенного вектора
-                        if ( !(src.at< Point2f >(y + V[k].y, x + V[k].x) == Point2f(x + V[k].x, y + V[k].y)) )    
+                            // save value vectors
+                        di.xy = Point( x + V[k].x, y + V[k].y );    // point
+                        di.dxy = Point( int(src.at< Point2f >(y + V[k].y, x + V[k].x).x) - (x + V[k].x), 
+                                        int(src.at< Point2f >(y + V[k].y, x + V[k].x).y) - (y + V[k].y) );  // offset
+                        for ( size_t kk = 0; kk < 9; kk++ )     // 2й блок сещения
                         {
-                                // норма L2 между вектором и смещенным вектором 
-                            Li.L2 = sqrt( (((x - src.at< Point2f >(y, x).x) - (V[k].x - src.at< Point2f >(y + V[k].y, x + V[k].x).x)) *
-                                           ((x - src.at< Point2f >(y, x).x) - (V[k].x - src.at< Point2f >(y + V[k].y, x + V[k].x).x))) + 
-                                          (((y - src.at< Point2f >(y, x).y) - (V[k].y - src.at< Point2f >(y + V[k].y, x + V[k].x).y)) *
-                                           ((y - src.at< Point2f >(y, x).y) - (V[k].y - src.at< Point2f >(y + V[k].y, x + V[k].x).y))) );
-                                // дельта координат меджу вектором и смещенным вектором
-                            Li.dxy = V[k];
-                                // значение смещенного вектора дижения 
-                            Li.xy = src.at< Point2f >(y + V[k].y, x + V[k].x);
-                            L2_block.push_back(Li);
-                            num_noZero++ ;
+                                // пропускаем схожие смещения
+                            if ( V[k] != V[kk] ) 
+                            {
+                                if ( ( x + V[kk].x <= src.cols ) && ( y + V[kk].y <= src.rows ) && 
+                                     ( x + V[kk].x >= 0 ) && ( y + V[kk].y >= 0 ) )     // border check
+                                {
+                                        // Проверка нулевости смещенного вектора
+                                    if ( !(src.at< Point2f >(y + V[k].y, x + V[k].x) == Point2f(x + V[k].x, y + V[k].y)) && 
+                                         !(src.at< Point2f >(y + V[kk].y, x + V[kk].x) == Point2f(x + V[kk].x, y + V[kk].y)) )    
+                                    {
+                                        di.L2 += sqrt( (((src.at< Point2f >(y + V[k].y, x + V[k].x).x - (x + V[k].x)) - (src.at< Point2f >(y + V[kk].y, x + V[kk].x).x - (x + V[kk].x))) *
+                                                        ((src.at< Point2f >(y + V[k].y, x + V[k].x).x - (x + V[k].x)) - (src.at< Point2f >(y + V[kk].y, x + V[kk].x).x - (x + V[kk].x)))) + 
+                                                       (((src.at< Point2f >(y + V[k].y, x + V[k].x).y - (y + V[k].y)) - (src.at< Point2f >(y + V[kk].y, x + V[kk].x).y - (y + V[kk].y))) *
+                                                        ((src.at< Point2f >(y + V[k].y, x + V[k].x).y - (y + V[k].y)) - (src.at< Point2f >(y + V[kk].y, x + V[kk].x).y - (y + V[kk].y)))) );
+                                        
+                                    }
+                                }
+                            }
                         }
                     }
+                    d_block.push_back(di);
                 }
-                if (num_noZero > 0)
+                    // Сортировка по норме L2
+                sort( d_block.begin(), d_block.end(), less_then_L2() );
+                for ( size_t i = 0; i < 9; i++ )
                 {
-                        // Сортировка по норме L2
-                    sort( L2_block.begin(), L2_block.end(), less_then_L2() );
-                        // Расчет среднего элемента (вектора) и присвоение его вектору 
-                    unsigned mid = unsigned( L2_block.size() / 2 );
-                    float xdx = L2_block.at( mid ).xy.x - L2_block.at( mid ).dxy.x;
-                    float ydy = L2_block.at( mid ).xy.y - L2_block.at( mid ).dxy.y;
-                    if ( (xdx >= 0) && (xdx <= dst.cols) && (ydy >= 0) && (ydy <= dst.rows) )
-                        dst.at< Point2f >(y, x) = Point2f( xdx, ydy );
+                        // Отбрасываем нулевые элементы
+                    if ( (d_block.at(i).dxy.x + d_block.at(i).dxy.y) > 0.0 )
+                    {
+                            // записываем значение полученного среднего вектора во все не нулевые вектора блока
+                        for ( size_t k = 0; k < 9; k++ )
+                        {
+                            if ( ( x + V[k].x <= src.cols ) && ( y + V[k].y <= src.rows ) && 
+                                 ( x + V[k].x >= 0 ) && ( y + V[k].y >= 0 ) )     // border check
+                            {
+                                float xdx = x + V[k].x + d_block.at(i).dxy.x;
+                                float ydy = y + V[k].y + d_block.at(i).dxy.y;
+                                if ( (xdx >= 0) && (xdx <= dst.cols) && (ydy >= 0) && (ydy <= dst.rows) )
+                                    dst.at< Point2f >(y + V[k].y, x + V[k].x) = Point2f( xdx, ydy );
+                            }
+                        }
+                            // Запись только в центрльную ячейку
+//                        float xdx = x + d_block.at(i).dxy.x;
+//                        float ydy = y + d_block.at(i).dxy.y;
+//                        if ( (xdx >= 0) && (xdx <= dst.cols) && (ydy >= 0) && (ydy <= dst.rows) )
+//                            dst.at< Point2f >(y, x) = Point2f( xdx, ydy );
+                        
+                        break;
+                    }
                 }
-    //                else 
-    //                {
-    //                    dst.at< Point2f >(y, x) = Point2f(y, x);
-    //                }
             }
         }
     }
@@ -244,7 +272,7 @@ int main(int argc, char *argv[])
 //            cout << "min: " << min_MSE << endl;
 //            cout << "min P: " << min_MSE_point << endl;
 
-            flow.at< Point2f >(j, i) = Point(min_MSE_point.x / S_block.width, min_MSE_point.y / S_block.height);    // Point2f-----!!!!!!!!!!!!!
+            flow.at< Point2f >(j, i) = Point2f(min_MSE_point.x / S_block.width, min_MSE_point.y / S_block.height);    // Point2f-----!!!!!!!!!!!!!
             
             Size_vector = start_num;
             
@@ -281,7 +309,9 @@ int main(int argc, char *argv[])
     
         // Recursive vector median filtering
     Mat flow_new = flow.clone();
-    filter_vectors( flow, flow_new, Vsquare);
+    filter_vectors( flow, flow_new );
+    flow_new.copyTo(flow);
+    filter_vectors( flow, flow_new );
     
         // Draw new vectors
     vectors = Mat::zeros(img_in1.size(), img_in1.type());
@@ -298,6 +328,8 @@ int main(int argc, char *argv[])
     imwrite( "Flow_new.png", vectors );
     imshow( "vec_flow", vectors );
     cout << " --- New_vec_dif cmplited" << endl;
+    
+        // Clustering
     
     
     
