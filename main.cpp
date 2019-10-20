@@ -8,6 +8,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/core/hal/interface.h>
+#include <opencv2/optflow.hpp>
 
 using namespace std;
 using namespace cv;
@@ -76,40 +77,40 @@ void LogMSE( const Size MN, vector< Point2i > V, Point2i bp, Point2i delta, int 
     float square = MN.width * MN.height;            // square block
     mse = Mat::ones( mse.size(), CV_32FC1 );
     mse *= 65025;
-    vector< float > mse_i(V.size(), 0.0f);
+    vector< float > mse_i( V.size(), 0.0f );
     for ( size_t k = 0; k < V.size(); k++ )         // num block
     {
         if ( ( delta.x + vS*V[k].x <= mse.cols ) && ( delta.y + vS*V[k].y <= mse.rows ) && 
              ( delta.x + vS*V[k].x >= 0 ) && ( delta.y + vS*V[k].y >= 0 ) )     // border check
         {
-            for ( int i = 0; i < MN.width; i++ )        // cols
+            for ( int x = 0; x < MN.width; x++ )        // cols
             {
-                for ( int j = 0; j < MN.height; j++ )   // rows
+                for ( int y = 0; y < MN.height; y++ )   // rows
                 {
-                        mse_i[k] += (img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i)) * 
-                                    (img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i));
+                        mse_i[k] += (img1.at< uchar >(bp.y + y, bp.x + x) - img2.at< uchar >(delta.y + vS*V[k].y + y, delta.x + vS*V[k].x + x)) * 
+                                    (img1.at< uchar >(bp.y + y, bp.x + x) - img2.at< uchar >(delta.y + vS*V[k].y + y, delta.x + vS*V[k].x + x));
 //                        mse_i[k] += abs(img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i));
                 }
             }
-            mse.at< float >(delta.y+vS*V[k].y, delta.x+vS*V[k].x) = mse_i[k] / square;
+            mse.at< float >(delta.y + vS*V[k].y, delta.x + vS*V[k].x) = mse_i[k] / square;
         }
     }
 }
 
-void filter_vectors( Mat &src, Mat &dst )
+void filter_vectors( Mat &src, Mat &dst, const Size MN )
 {
     const vector< Point2i > V = { Point(-1,-1), Point(0,-1), Point(1,-1), Point(-1,0), Point(0,0), 
                                         Point(1,0), Point(-1,1), Point(0,1), Point(1,1) };
         // Recursive vector median filtering
     //dst = src.clone();
-    for ( int x = 0; x < src.cols; x +=3 )
+    for ( int x = 0; x < src.cols; x += MN.width )
     {
-        for ( int y = 0; y < src.rows; y +=3 )
+        for ( int y = 0; y < src.rows; y += MN.height )
         {
                 // проверка нулевости вектора
             if ( !(src.at< Point2f >(y, x) == Point2f(x, y)) )
             {
-                    // блок из суммы вычесленных растояний ежду векторами
+                    // блок из суммы вычесленных растояний между векторами
                 vector< L2_norm > d_block;
                 for ( size_t k = 0; k < 9; k++ )         // num block, блоки смещения
                 {
@@ -117,29 +118,29 @@ void filter_vectors( Mat &src, Mat &dst )
                     di.L2 = 0;
                     di.xy = Point(0,0);
                     di.dxy = Point(0,0);
-                    if ( ( x + V[k].x <= src.cols ) && ( y + V[k].y <= src.rows ) && 
-                         ( x + V[k].x >= 0 ) && ( y + V[k].y >= 0 ) )     // border check
+                    if ( ( x + MN.width*V[k].x <= src.cols ) && ( y + MN.height*V[k].y <= src.rows ) && 
+                         ( x + MN.width*V[k].x >= 0 ) && ( y + MN.height*V[k].y >= 0 ) )     // border check
                     {
                             // save value vectors
-                        di.xy = Point( x + V[k].x, y + V[k].y );    // point
-                        di.dxy = Point( int(src.at< Point2f >(y + V[k].y, x + V[k].x).x) - (x + V[k].x), 
-                                        int(src.at< Point2f >(y + V[k].y, x + V[k].x).y) - (y + V[k].y) );  // offset
+                        di.xy = Point( x + MN.width*V[k].x, y + MN.height*V[k].y );    // point
+                        di.dxy = Point( int(src.at< Point2f >(y + MN.height*V[k].y, x + MN.width*V[k].x).x), 
+                                        int(src.at< Point2f >(y + MN.height*V[k].y, x + MN.width*V[k].x).y) );  // offset
                         for ( size_t kk = 0; kk < 9; kk++ )     // 2й блок сещения
                         {
                                 // пропускаем схожие смещения
                             if ( V[k] != V[kk] ) 
                             {
-                                if ( ( x + V[kk].x <= src.cols ) && ( y + V[kk].y <= src.rows ) && 
-                                     ( x + V[kk].x >= 0 ) && ( y + V[kk].y >= 0 ) )     // border check
+                                if ( ( x + MN.width*V[kk].x <= src.cols ) && ( y + MN.height*V[kk].y <= src.rows ) && 
+                                     ( x + MN.width*V[kk].x >= 0 ) && ( y + MN.height*V[kk].y >= 0 ) )     // border check
                                 {
                                         // Проверка нулевости смещенного вектора
-                                    if ( !(src.at< Point2f >(y + V[k].y, x + V[k].x) == Point2f(x + V[k].x, y + V[k].y)) && 
-                                         !(src.at< Point2f >(y + V[kk].y, x + V[kk].x) == Point2f(x + V[kk].x, y + V[kk].y)) )    
+                                    if ( !(src.at< Point2f >(y + MN.height*V[k].y, x + MN.width*V[k].x) == Point2f(x + MN.width*V[k].x, y + MN.height*V[k].y)) && 
+                                         !(src.at< Point2f >(y + MN.height*V[kk].y, x + MN.width*V[kk].x) == Point2f(x + MN.width*V[kk].x, y + MN.height*V[kk].y)) )    
                                     {
-                                        di.L2 += sqrt( (((src.at< Point2f >(y + V[k].y, x + V[k].x).x - (x + V[k].x)) - (src.at< Point2f >(y + V[kk].y, x + V[kk].x).x - (x + V[kk].x))) *
-                                                        ((src.at< Point2f >(y + V[k].y, x + V[k].x).x - (x + V[k].x)) - (src.at< Point2f >(y + V[kk].y, x + V[kk].x).x - (x + V[kk].x)))) + 
-                                                       (((src.at< Point2f >(y + V[k].y, x + V[k].x).y - (y + V[k].y)) - (src.at< Point2f >(y + V[kk].y, x + V[kk].x).y - (y + V[kk].y))) *
-                                                        ((src.at< Point2f >(y + V[k].y, x + V[k].x).y - (y + V[k].y)) - (src.at< Point2f >(y + V[kk].y, x + V[kk].x).y - (y + V[kk].y)))) );
+                                        di.L2 += sqrt( (((src.at< Point2f >(y + MN.height*V[k].y, x + MN.width*V[k].x).x - (x + MN.width*V[k].x)) - (src.at< Point2f >(y + MN.height*V[kk].y, x + MN.width*V[kk].x).x - (x + MN.width*V[kk].x))) *
+                                                        ((src.at< Point2f >(y + MN.height*V[k].y, x + MN.width*V[k].x).x - (x + MN.width*V[k].x)) - (src.at< Point2f >(y + MN.height*V[kk].y, x + MN.width*V[kk].x).x - (x + MN.width*V[kk].x)))) + 
+                                                       (((src.at< Point2f >(y + MN.height*V[k].y, x + MN.width*V[k].x).y - (y + MN.height*V[k].y)) - (src.at< Point2f >(y + MN.height*V[kk].y, x + MN.width*V[kk].x).y - (y + MN.height*V[kk].y))) *
+                                                        ((src.at< Point2f >(y + MN.height*V[k].y, x + MN.width*V[k].x).y - (y + MN.height*V[k].y)) - (src.at< Point2f >(y + MN.height*V[kk].y, x + MN.width*V[kk].x).y - (y + MN.height*V[kk].y)))) );
                                         
                                     }
                                 }
@@ -153,25 +154,25 @@ void filter_vectors( Mat &src, Mat &dst )
                 for ( size_t i = 0; i < 9; i++ )
                 {
                         // Отбрасываем нулевые элементы
-                    if ( (d_block.at(i).dxy.x + d_block.at(i).dxy.y) > 0.0 )
+                    if ( Point(d_block.at(i).dxy.x, d_block.at(i).dxy.y) != Point(0, 0) ) //( (d_block.at(i).dxy.x + d_block.at(i).dxy.y) > 0.0 )
                     {
                             // записываем значение полученного среднего вектора во все не нулевые вектора блока
-                        for ( size_t k = 0; k < 9; k++ )
-                        {
-                            if ( ( x + V[k].x <= src.cols ) && ( y + V[k].y <= src.rows ) && 
-                                 ( x + V[k].x >= 0 ) && ( y + V[k].y >= 0 ) )     // border check
-                            {
-                                float xdx = x + V[k].x + d_block.at(i).dxy.x;
-                                float ydy = y + V[k].y + d_block.at(i).dxy.y;
-                                if ( (xdx >= 0) && (xdx <= dst.cols) && (ydy >= 0) && (ydy <= dst.rows) )
-                                    dst.at< Point2f >(y + V[k].y, x + V[k].x) = Point2f( xdx, ydy );
-                            }
-                        }
+//                        for ( size_t k = 0; k < 9; k++ )
+//                        {
+//                            if ( ( x + V[k].x <= src.cols ) && ( y + V[k].y <= src.rows ) && 
+//                                 ( x + V[k].x >= 0 ) && ( y + V[k].y >= 0 ) )     // border check
+//                            {
+//                                float xdx = x + V[k].x + d_block.at(i).dxy.x;
+//                                float ydy = y + V[k].y + d_block.at(i).dxy.y;
+//                                if ( (xdx >= 0) && (xdx <= dst.cols) && (ydy >= 0) && (ydy <= dst.rows) )
+//                                    dst.at< Point2f >(y + V[k].y, x + V[k].x) = Point2f( xdx, ydy );
+//                            }
+//                        }
                             // Запись только в центрльную ячейку
-//                        float xdx = x + d_block.at(i).dxy.x;
-//                        float ydy = y + d_block.at(i).dxy.y;
-//                        if ( (xdx >= 0) && (xdx <= dst.cols) && (ydy >= 0) && (ydy <= dst.rows) )
-//                            dst.at< Point2f >(y, x) = Point2f( xdx, ydy );
+                        float xdx = x + d_block.at(i).dxy.x;
+                        float ydy = y + d_block.at(i).dxy.y;
+                        if ( (xdx >= 0) && (xdx <= dst.cols) && (ydy >= 0) && (ydy <= dst.rows) )
+                            dst.at< Point2f >(y, x) = Point2f( xdx, ydy );
                         
                         break;
                     }
@@ -198,8 +199,8 @@ int main(int argc, char *argv[])
     Mat img_grey1, img_grey2;
     cvtColor( img_in1, img_grey1, COLOR_BGR2GRAY );
     cvtColor( img_in2, img_grey2, COLOR_BGR2GRAY );
-    GaussianBlur( img_grey1, img_grey1, Size(3,3), 5, 0, BORDER_DEFAULT);
-    GaussianBlur( img_grey2, img_grey2, Size(3,3), 5, 0, BORDER_DEFAULT);
+//    GaussianBlur( img_grey1, img_grey1, Size(3,3), 5, 0, BORDER_DEFAULT);
+//    GaussianBlur( img_grey2, img_grey2, Size(3,3), 5, 0, BORDER_DEFAULT);
     imwrite( "img_grey1.png", img_grey1 );
     imwrite( "img_grey2.png", img_grey2 );
     cout << "img.cols (width) = " << img_in1.cols << endl;
@@ -214,7 +215,8 @@ int main(int argc, char *argv[])
     cout << "Block(M x N)= " << S_block.width << "x" << S_block.height << endl;
     
         // MSE & optical vectors
-    Mat flow = Mat::zeros( img_in1.rows / S_block.height, img_in1.cols / S_block.width, CV_32FC2 );
+    //Mat flow = Mat::zeros( img_in1.rows / S_block.height, img_in1.cols / S_block.width, CV_32FC2 );
+    Mat flow = Mat::zeros( img_grey1.size(), CV_32FC2 );
     cout << "Flow.cols (width) = " << flow.cols << endl;
     cout << "Flow.rows (height) = " << flow.rows << endl;
     Mat MSE = Mat::zeros( img_grey1.size(), CV_32FC1 );
@@ -234,20 +236,24 @@ int main(int argc, char *argv[])
 
         // Calculate vectors
     imshow( "vec_flow", img_in2 );
-    waitKey(50);
+    waitKey(70);
     float progress = 0.0;
     int barWidth = 70;
-    float step = 1.0f / flow.total();
+    float step = 1.0f / flow.total() * S_block.width * S_block.height;
     progress += step;
     cout << " --- Start vector calculation" << endl;
-    for ( int i = 0; i < flow.cols; i++ )
+    for ( int i = 0; i < flow.cols; i += S_block.width )
     {
-        for ( int j = 0; j < flow.rows; j++ )
+        for ( int j = 0; j < flow.rows; j += S_block.height )
         {
-            block_point.x = S_block.width * i;
-            block_point.y = S_block.height * j;
-            offset_point.x = S_block.width * i;
-            offset_point.y = S_block.height * j;
+//            block_point.x = S_block.width * i;
+//            block_point.y = S_block.height * j;
+//            offset_point.x = S_block.width * i;
+//            offset_point.y = S_block.height * j;
+            block_point.x = i;
+            block_point.y = j;
+            offset_point.x = i;
+            offset_point.y = j;
             while ( Size_vector > 1 )
             {
                 LogMSE( S_block, Vcross, block_point, offset_point, Size_vector, img_grey2, img_grey1, MSE );
@@ -256,50 +262,51 @@ int main(int argc, char *argv[])
 //                cout << "min: " << min_MSE << endl;
 //                cout << "min P: " << min_MSE_point << endl;
                 
-                if ( offset_point == min_MSE_point )
-                {
-                    Size_vector /= 2;
-                }
-                else
-                {
-                    offset_point = min_MSE_point;
-                    Size_vector /= 2;
-                }
+                Size_vector /= 2;
+                if ( offset_point != min_MSE_point ) offset_point = min_MSE_point;
             }
             LogMSE( S_block, Vsquare, block_point, offset_point, Size_vector, img_grey2, img_grey1, MSE );
 //            cout << "MSE( " << offset_point.x << ", " << offset_point.y << " ): \n" << MSE << endl;
             minMaxLoc( MSE, &min_MSE, &max_MSE, &min_MSE_point, &max_MSE_point );
 //            cout << "min: " << min_MSE << endl;
 //            cout << "min P: " << min_MSE_point << endl;
-
-            flow.at< Point2f >(j, i) = Point2f(min_MSE_point.x / S_block.width, min_MSE_point.y / S_block.height);    // Point2f-----!!!!!!!!!!!!!
+            
+            flow.at< Point2f >(j, i) = Point2f( i - min_MSE_point.x, j - min_MSE_point.y );     // ??????
+            //flow.at< Point2f >(j, i) = Point2f( j - min_MSE_point.y, i - min_MSE_point.x );
             
             Size_vector = start_num;
             
                 // progress
             progress += step;
-            std::cout << "[";
+            cout << "[";
             int pos = int( float(barWidth) * progress );
             for (int i = 0; i < barWidth; ++i) {
-                if (i < pos) std::cout << "=";
-                else if (i == pos) std::cout << ">";
-                else std::cout << " ";
+                if (i < pos) cout << "=";
+                else if (i == pos) cout << ">";
+                else cout << " ";
             }
-            std::cout << "] " << int(progress * 100.0f) << " %\r";
-            std::cout.flush();
+            cout << "] " << int(progress * 100.0f) << " %\r";
+            cout.flush();
         }
     }
     cout << endl;
     
+    //optflow::calcOpticalFlowSparseToDense( img_grey2, img_grey1, flow, 4, 128, 0.1f, true, 500.0f, 1.5f);
+    
         // Draw vectors
     Mat vectors = Mat::zeros(img_in1.size(), img_in1.type());
-    for ( int i = 0; i < flow.cols; i++ )
+    for ( int x = 0; x < flow.cols; x += S_block.width )
     {
-        for ( int j = 0; j < flow.rows; j++ )
+        for ( int y = 0; y < flow.rows; y += S_block.height )
         {
+            const Point2f flowatxy = flow.at< Point2f >(y, x) * 1;
+//            line( vectors,
+//                  Point( int( S_block.width*(x+0.5f) ), int( S_block.height*(y+0.5f) ) ),     // cvRound()
+//                  Point( int( S_block.width*(flow_new.at<Point2f>(y,x).x+0.5f) ), int( S_block.height*(flow_new.at<Point2f>(y,x).y+0.5f) ) ),
+//                  Scalar(255, 100, 0) );
             line( vectors,
-                  Point( int( S_block.width*(i+0.5f) ), int( S_block.height*(j+0.5f) ) ),     // cvRound()
-                  Point( int( S_block.width*(flow.at<Point2f>(j,i).x+0.5f) ), int( S_block.height*(flow.at<Point2f>(j,i).y+0.5f) ) ),
+                  Point( x, y ),     // cvRound()
+                  Point( cvRound( x + flowatxy.x), cvRound(y + flowatxy.y ) ),
                   Scalar(255, 100, 0) );
         }
     }
@@ -309,19 +316,24 @@ int main(int argc, char *argv[])
     
         // Recursive vector median filtering
     Mat flow_new = flow.clone();
-    filter_vectors( flow, flow_new );
-    flow_new.copyTo(flow);
-    filter_vectors( flow, flow_new );
+    filter_vectors( flow, flow_new, S_block );
+//    flow_new.copyTo(flow);
+//    filter_vectors( flow, flow_new, S_block );
     
         // Draw new vectors
     vectors = Mat::zeros(img_in1.size(), img_in1.type());
-    for ( int i = 0; i < flow_new.cols; i++ )
+    for ( int x = 0; x < flow_new.cols; x += S_block.width )
     {
-        for ( int j = 0; j < flow_new.rows; j++ )
+        for ( int y = 0; y < flow_new.rows; y += S_block.height )
         {
+            const Point2f flowatxy = flow_new.at< Point2f >(y, x) * 1;
+//            line( vectors,
+//                  Point( int( S_block.width*(x+0.5f) ), int( S_block.height*(y+0.5f) ) ),     // cvRound()
+//                  Point( int( S_block.width*(flow_new.at<Point2f>(y,x).x+0.5f) ), int( S_block.height*(flow_new.at<Point2f>(y,x).y+0.5f) ) ),
+//                  Scalar(255, 100, 0) );
             line( vectors,
-                  Point( int( S_block.width*(i+0.5f) ), int( S_block.height*(j+0.5f) ) ),     // cvRound()
-                  Point( int( S_block.width*(flow_new.at<Point2f>(j,i).x+0.5f) ), int( S_block.height*(flow_new.at<Point2f>(j,i).y+0.5f) ) ),
+                  Point( x, y ),     // cvRound()
+                  Point( cvRound(x + flowatxy.x), cvRound(y + flowatxy.y) ),
                   Scalar(255, 100, 0) );
         }
     }
