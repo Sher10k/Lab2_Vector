@@ -80,7 +80,7 @@ void PaintVectors( Mat &flow, Mat &vectors, const Size MN )
             line( vectors,
                   Point( x + MN.width/2, y + MN.height/2 ),
                   Point( cvRound( x + flowatxy.x + MN.width/2 ), cvRound(y + flowatxy.y + MN.height/2 ) ),
-                  Scalar(255, 100, 0) );
+                  Scalar(255, 255, 255) );
         }
     }
 }
@@ -292,6 +292,7 @@ int main()  // int argc, char *argv[]
         // Draw vectors
     Mat vectors = Mat::zeros(img_in1.size(), img_in1.type());
     PaintVectors( flow, vectors, S_block );
+    bitwise_not( vectors, vectors );
     imwrite( "Flow.png", vectors );
     //imshow( "vec_flow", vectors );
     cout << " --- vec_dif cmplited" << endl;
@@ -308,6 +309,7 @@ int main()  // int argc, char *argv[]
         // Draw new vectors
     vectors = Mat::zeros(img_in1.size(), img_in1.type());
     PaintVectors( flow_new, vectors, S_block );
+    bitwise_not( vectors, vectors );
     imwrite( "Flow_new.png", vectors );
     imshow( "vec_flow", vectors );
     cout << " --- New_vec_dif cmplited" << endl;
@@ -362,20 +364,23 @@ int main()  // int argc, char *argv[]
                 for ( int i = 0; i < S_block.width; i++ )
                     for ( int j = 0; j < S_block.height; j++ )
                         cluster.at< uchar >(y+j, x+i) = cluster.at< uchar >(y, x);
-    imshow( "Cluster", cluster );
-    imwrite( "Cluster.png", cluster );
+    
+    Mat img_temp = cluster.clone();
+    bitwise_not( cluster, img_temp );
+    imshow( "Cluster", img_temp );
+    imwrite( "Cluster.png", img_temp );
     
     threshold( cluster, cluster, 1, 255, THRESH_BINARY  );
-    Mat img_temp = cluster.clone();
     Mat element = getStructuringElement( MORPH_RECT, Point(int(S_block.width*1.3), int(S_block.height*1.3)), Point(-1, -1) );
     morphologyEx( cluster, img_temp, MORPH_OPEN, element );
     morphologyEx( img_temp, cluster, MORPH_CLOSE, element );
     
-    imshow( "Morph", cluster );
-    imwrite( "Morph.png", cluster );
+    bitwise_not( cluster, img_temp );
+    imshow( "Morph", img_temp );
+    imwrite( "Morph.png", img_temp );
     
     vector< vector< Point > > contours;
-    vector<Vec4i> hierarchy;
+    vector< Vec4i > hierarchy;
     findContours( cluster, contours, hierarchy, RETR_LIST, CHAIN_APPROX_SIMPLE );
     int idx = 0;
     for( ; idx >= 0; idx = hierarchy[unsigned(idx)][0] )
