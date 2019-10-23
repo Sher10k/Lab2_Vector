@@ -102,7 +102,7 @@ void LogMSE( const Size MN, vector< Point2i > V, Point2i bp, Point2i delta, int 
                 {
                         mse_i[k] += (img1.at< uchar >(bp.y + y, bp.x + x) - img2.at< uchar >(delta.y + vS*V[k].y + y, delta.x + vS*V[k].x + x)) * 
                                     (img1.at< uchar >(bp.y + y, bp.x + x) - img2.at< uchar >(delta.y + vS*V[k].y + y, delta.x + vS*V[k].x + x));
-//                        mse_i[k] += abs(img1.at< uchar >(bp.y + j, bp.x + i) - img2.at< uchar >(delta.y + vS*V[k].y + j, delta.x + vS*V[k].x + i));
+//                        mse_i[k] += abs(img1.at< uchar >(bp.y + y, bp.x + x) - img2.at< uchar >(delta.y + vS*V[k].y + y, delta.x + vS*V[k].x + x));
                 }
             }
             mse.at< float >(delta.y + vS*V[k].y, delta.x + vS*V[k].x) = mse_i[k] / square;
@@ -131,8 +131,9 @@ void filter_vectors( Mat &src, Mat &dst, const Size MN )
                     di.L2 = 0;
                     di.xy = Point(0,0);
                     di.dxy = Point(0,0);
+                        // Border check
                     if ( ( x + MN.width*V[k].x <= src.cols ) && ( y + MN.height*V[k].y <= src.rows ) && 
-                         ( x + MN.width*V[k].x >= 0 ) && ( y + MN.height*V[k].y >= 0 ) )     // border check
+                         ( x + MN.width*V[k].x >= 0 ) && ( y + MN.height*V[k].y >= 0 ) )
                     {
                             // save value vectors
                         di.xy = Point( x + MN.width*V[k].x, y + MN.height*V[k].y );    // point
@@ -143,8 +144,9 @@ void filter_vectors( Mat &src, Mat &dst, const Size MN )
                                 // пропускаем схожие смещения
                             if ( V[k] != V[kk] ) 
                             {
+                                    // Border check
                                 if ( ( x + MN.width*V[kk].x <= src.cols ) && ( y + MN.height*V[kk].y <= src.rows ) && 
-                                     ( x + MN.width*V[kk].x >= 0 ) && ( y + MN.height*V[kk].y >= 0 ) )     // border check
+                                     ( x + MN.width*V[kk].x >= 0 ) && ( y + MN.height*V[kk].y >= 0 ) )
                                 {
                                         // Проверка нулевости смещенного вектора
                                     if ( !(src.at< Point2f >(y + MN.height*V[k].y, x + MN.width*V[k].x) == Point2f(0, 0)) && 
@@ -173,7 +175,6 @@ void filter_vectors( Mat &src, Mat &dst, const Size MN )
                         float ydy = d_block.at(i).dxy.y;
                         if ( (x + xdx >= 0) && (x + xdx <= dst.cols) && (y + ydy >= 0) && (y + ydy <= dst.rows) )
                             dst.at< Point2f >(y, x) = Point2f( xdx, ydy );
-                        
                         break;
                     }
                 }
@@ -189,6 +190,11 @@ int main()  // int argc, char *argv[]
     string file_name = "/home/roman/Reconst_Stereo/zcm_logs/zcmlog-2019-09-23_L_05.avi";
     Mat img_in1, img_in2;
     ReadVideo( file_name, &img_in1, &img_in2 );
+    if ( img_in1.empty() || img_in2.empty() ) 
+    {
+        cout << " ! ! ! - Image is empty" << endl;
+        exit(0);
+    }
     imwrite( "img_in1.png", img_in1 );
     imwrite( "img_in2.png", img_in2 );
 //    imshow( "img1", img_in1 );
@@ -197,8 +203,8 @@ int main()  // int argc, char *argv[]
     Mat img_grey1, img_grey2;
     cvtColor( img_in1, img_grey1, COLOR_BGR2GRAY );
     cvtColor( img_in2, img_grey2, COLOR_BGR2GRAY );
-    GaussianBlur( img_grey1, img_grey1, Size(3,3), 5, 0, BORDER_DEFAULT);
-    GaussianBlur( img_grey2, img_grey2, Size(3,3), 5, 0, BORDER_DEFAULT);
+    GaussianBlur( img_grey1, img_grey1, Size(3,3), 7, 0, BORDER_DEFAULT);
+    GaussianBlur( img_grey2, img_grey2, Size(3,3), 7, 0, BORDER_DEFAULT);
     imwrite( "img_grey1.png", img_grey1 );
     imwrite( "img_grey2.png", img_grey2 );
     cout << "img.cols (width) = " << img_in1.cols << endl;
@@ -218,13 +224,8 @@ int main()  // int argc, char *argv[]
     }
     
         // MSE & optical vectors
-    //Mat flow = Mat::zeros( img_in1.rows / S_block.height, img_in1.cols / S_block.width, CV_32FC2 );
     Mat flow = Mat::zeros( img_grey1.size(), CV_32FC2 );
-    cout << "Flow.cols (width) = " << flow.cols << endl;
-    cout << "Flow.rows (height) = " << flow.rows << endl;
     Mat MSE = Mat::zeros( img_grey1.size(), CV_32FC1 );
-    cout << "MSE.cols (width) = " << MSE.cols << endl;
-    cout << "MSE.rows (height) = " << MSE.rows << endl;
     
     int start_num = 4;
     int Size_vector = start_num;    // Initial displacement vector
@@ -238,8 +239,6 @@ int main()  // int argc, char *argv[]
                                         Point(-1,0), Point(-1,-1), Point(0,-1), Point(1,-1) };
 
         // Calculate vectors
-    imshow( "vec_flow", img_in2 );
-    waitKey(70);
     float progress = 0.0;
     int barWidth = 70;
     float step = 1.0f / flow.total() * S_block.width * S_block.height;
@@ -294,15 +293,17 @@ int main()  // int argc, char *argv[]
     Mat vectors = Mat::zeros(img_in1.size(), img_in1.type());
     PaintVectors( flow, vectors, S_block );
     imwrite( "Flow.png", vectors );
-    imshow( "vec_flow", vectors );
+    //imshow( "vec_flow", vectors );
     cout << " --- vec_dif cmplited" << endl;
     
         // Recursive vector median filtering
     Mat flow_new = flow.clone();
     flow_new *= 0;
-    filter_vectors( flow, flow_new, S_block );
-    flow_new.copyTo(flow);
-    filter_vectors( flow, flow_new, S_block );
+    for ( int i = 0; i < 2; i++ )
+    {
+        filter_vectors( flow, flow_new, S_block );
+        flow_new.copyTo( flow );
+    }
     
         // Draw new vectors
     vectors = Mat::zeros(img_in1.size(), img_in1.type());
@@ -312,14 +313,84 @@ int main()  // int argc, char *argv[]
     cout << " --- New_vec_dif cmplited" << endl;
     
         // Clustering
+    Mat cluster = Mat::zeros( flow_new.size(), CV_8UC1 );
+    const vector< Point2i > V = { Point(-1,-1), Point(0,-1), Point(1,-1), Point(-1,0), Point(0,0), 
+                                        Point(1,0), Point(-1,1), Point(0,1), Point(1,1) };
+    uchar marker = 0;
+    for ( int x = 0; x < cluster.cols; x += S_block.width )
+    {
+        for ( int y = 0; y < cluster.rows; y += S_block.height )
+        {
+            if ( cluster.at< uchar >(y, x) == 0 && flow_new.at< Point2f >(y, x) != Point2f(0, 0) )
+            {
+                marker++;
+                cluster.at< uchar >(y, x) = marker;
+            }
+            for ( size_t k = 0; k < 9; k++ )         // num block, блоки смещения
+            {
+                    // Border check
+                if ( ( x + S_block.width*V[k].x <= cluster.cols ) && ( y + S_block.height*V[k].y <= cluster.rows ) && 
+                     ( x + S_block.width*V[k].x >= 0 ) && ( y + S_block.height*V[k].y >= 0 ) )
+                {
+                        // not zero vector & zero cluster
+                    if ( flow_new.at< Point2f >(y + S_block.height*V[k].y, x + S_block.width*V[k].x) != Point2f(0, 0) && 
+                         cluster.at< uchar >(y + S_block.height*V[k].y, x + S_block.width*V[k].x) == 0 )  
+                    {
+                        double V1V2 = double( ( flow_new.at< Point2f >(y, x).x ) * 
+                                              ( flow_new.at< Point2f >(y + S_block.height*V[k].y, x + S_block.width*V[k].x).x ) + 
+                                              ( flow_new.at< Point2f >(y, x).y ) * 
+                                              ( flow_new.at< Point2f >(y + S_block.height*V[k].y, x + S_block.width*V[k].x).y ) );
+                        double VV = sqrt( (pow( flow_new.at< Point2f >(y, x).x, 2 ) + 
+                                           pow( flow_new.at< Point2f >(y, x).y, 2 )) * 
+                                          (pow( flow_new.at< Point2f >(y + S_block.height*V[k].y, x + S_block.width*V[k].x).x, 2 ) + 
+                                           pow( flow_new.at< Point2f >(y + S_block.height*V[k].y, x + S_block.width*V[k].x).y, 2 )) );
+                        double sinA = V1V2 / VV;    // Range -1..1
+                        
+                            // Angle check
+                        if ( sinA > 0 )
+                            cluster.at< uchar >(y + S_block.height*V[k].y, x + S_block.width*V[k].x) = cluster.at< uchar >(y, x);
+                    }
+                }
+            }
+        }
+    }
+    cout << "Number of cluster: " << marker * 1.0 << endl;
+    normalize( cluster, cluster, 255.0, 0.0, NORM_MINMAX );
+    for ( int x = 0; x < cluster.cols; x += S_block.width )
+        for ( int y = 0; y < cluster.rows; y += S_block.height )
+            if ( cluster.at< uchar >(y, x) )
+                for ( int i = 0; i < S_block.width; i++ )
+                    for ( int j = 0; j < S_block.height; j++ )
+                        cluster.at< uchar >(y+j, x+i) = cluster.at< uchar >(y, x);
+    imshow( "Cluster", cluster );
+    imwrite( "Cluster.png", cluster );
     
+    threshold( cluster, cluster, 1, 255, THRESH_BINARY  );
+    Mat img_temp = cluster.clone();
+    Mat element = getStructuringElement( MORPH_RECT, Point(int(S_block.width*1.3), int(S_block.height*1.3)), Point(-1, -1) );
+    morphologyEx( cluster, img_temp, MORPH_OPEN, element );
+    morphologyEx( img_temp, cluster, MORPH_CLOSE, element );
     
+    imshow( "Morph", cluster );
+    imwrite( "Morph.png", cluster );
+    
+    vector< vector< Point > > contours;
+    vector<Vec4i> hierarchy;
+    findContours( cluster, contours, hierarchy, RETR_LIST, CHAIN_APPROX_SIMPLE );
+    int idx = 0;
+    for( ; idx >= 0; idx = hierarchy[unsigned(idx)][0] )
+    {
+        Scalar color( rand()&255, rand()&255, rand()&255 );
+        drawContours( img_in1, contours, idx, color, 3, LINE_8, hierarchy );
+    }
+    imshow( "Conturs", img_in1 );
+    imwrite( "Conturs.png", img_in1 );
     
     waitKey(0);
     MSE.release();
     flow.release();
 
-    return 0; // a.exec();
+    return 0;
 }
 
 
